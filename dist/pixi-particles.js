@@ -1,11 +1,11 @@
 /*!
  * pixi-particles - v3.1.0
- * Compiled Wed, 29 Aug 2018 15:47:46 UTC
+ * Compiled Thu, 25 Oct 2018 16:42:07 UTC
  *
  * pixi-particles is licensed under the MIT License.
  * http://www.opensource.org/licenses/mit-license
  */
-(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.pixiParticles = f()}})(function(){var define,module,exports;return (function(){function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s}return e})()({1:[function(_dereq_,module,exports){
+(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.pixiParticles = f()}})(function(){var define,module,exports;return (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(_dereq_,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = Object.setPrototypeOf ||
@@ -105,6 +105,7 @@ var AnimatedParticle = /** @class */ (function (_super) {
                 //loop elapsed back around
                 if (this.loop)
                     this.elapsed = this.elapsed % this.duration;
+                //subtract a small amount to prevent attempting to go past the end of the animation
                 else
                     this.elapsed = this.duration - 0.000001;
             }
@@ -143,11 +144,12 @@ var AnimatedParticle = /** @class */ (function (_super) {
                     outTextures.push(Texture.fromImage(tex));
                 else if (tex instanceof Texture)
                     outTextures.push(tex);
+                //assume an object with extra data determining duplicate frame data
                 else {
                     var dupe = tex.count || 1;
                     if (typeof tex.texture == "string")
                         tex = Texture.fromImage(tex.texture);
-                    else
+                    else // if(tex.texture instanceof Texture)
                         tex = tex.texture;
                     for (; dupe > 0; --dupe) {
                         outTextures.push(tex);
@@ -176,13 +178,295 @@ var AnimatedParticle = /** @class */ (function (_super) {
 }(Particle_1.default));
 exports.default = AnimatedParticle;
 
-},{"./Particle":3}],2:[function(_dereq_,module,exports){
+},{"./Particle":4}],2:[function(_dereq_,module,exports){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+/**
+ * A Catmull-Rom spline
+ * @memberof PIXI.particles
+ * @constructor
+ */
+var CatmullRom = /** @class */ (function () {
+    /**
+     * @function CatmullRom
+     * @Description helper function for creating/storing a set of points defining a smooth path
+     * @param controlPoints {Array<PIXI.Point>}
+     * @param [kAlpha = 0.5] {number} knot parameterisation. 0 = uniform/tight, 0.5 = centripetal/default, 1.0 = chordal/loose.
+     * @param [pointsPerSegment = 50] {number} Total points generated across any two control points.
+     * @constructor
+     */
+    function CatmullRom(controlPoints, kAlpha, pointsPerSegment) {
+        this._controlPoints = controlPoints;
+        this._kAlpha = (kAlpha == 0 ? 0 : (kAlpha || 0.5));
+        this._pointsPerSegment = pointsPerSegment || 50;
+        this._points = [];
+        this._dirty = true;
+    }
+    /**
+     * Merges two arrays, removing any duplicate values
+     * @method PIXI.particles.CatmullRom#mergeUnique
+     */
+    CatmullRom.mergeUnique = function () {
+        var args = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            args[_i] = arguments[_i];
+        }
+        var hash = {}, ret = [], encode, i, j;
+        for (i = 0; i < args.length; i++) {
+            for (j = 0; j < args[i].length; j++) {
+                encode = args[i][j].x + "_" + args[i][j].y;
+                if (hash[encode] !== true) {
+                    hash[encode] = true;
+                    ret[ret.length] = args[i][j];
+                }
+            }
+        }
+        return ret;
+    };
+    /**
+     * Calculates the distance between two points.
+     * @method PIXI.particles.CatmullRom#pointDistance
+     */
+    CatmullRom.pointDistance = function (a, b) {
+        return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+    };
+    /**
+     * Calculates the angle between two points.
+     * @method PIXI.particles.CatmullRom#pointAngle
+     */
+    CatmullRom.pointAngle = function (a, b) {
+        return Math.atan2(b.x - a.x, b.y - a.y);
+    };
+    /**
+     * returns the point nearest to the input point
+     * @method getNearest
+     * @param point {PIXI.Point} Point to test
+     * @returns {PIXI.Point}
+     */
+    CatmullRom.prototype.getNearest = function (point) {
+        var nearest = 0;
+        var dist = CatmullRom.pointDistance(point, this._points[0]);
+        var newDist;
+        for (var i = 0; i < this._points.length; i++) {
+            if (this._points[i].x === point.x && this._points[i].y === point.y) {
+                return this._points[i];
+            }
+            else {
+                newDist = CatmullRom.pointDistance(point, this._points[i]);
+                if (dist > newDist) {
+                    nearest = i;
+                    dist = newDist;
+                }
+            }
+        }
+        return this._points[nearest];
+    };
+    ;
+    /**
+     * @method getIndex
+     * @description returns the point index at the given progress
+     * @param progress {number} Path progress as a fraction
+     */
+    CatmullRom.prototype.getIndex = function (progress) {
+        var index = (this._points.length) * (progress % 1);
+        if (index < 0) {
+            index = this._points.length + index;
+        }
+        return Math.floor(index);
+    };
+    ;
+    /**
+     * @method getNormals
+     * @description returns the normal vector at the input point (i.e. away from the middle of the shape)
+     * @param index {number} Input point index
+     */
+    CatmullRom.prototype.getNormals = function (index) {
+        var pointPrev = this._points[index === 0 ? this._points.length - 1 : index - 1];
+        var pointNext = this._points[index === this._points.length - 1 ? 0 : index + 1];
+        var len = CatmullRom.pointDistance(pointPrev, pointNext);
+        var dx = (pointNext.x - pointPrev.x) / len;
+        var dy = (pointNext.y - pointPrev.y) / len;
+        return { toward: new PIXI.Point(-dy, dx), away: new PIXI.Point(dy, -dx) };
+    };
+    ;
+    Object.defineProperty(CatmullRom.prototype, "controlPoints", {
+        /**
+         * @member {Array} PIXI.particles.CatmullRom#controlPoints
+         */
+        get: function () {
+            if (this._dirty) {
+                this.populate();
+            }
+            return this._controlPoints;
+        },
+        set: function (newVal) {
+            this._controlPoints = newVal;
+            this._dirty = true;
+        },
+        enumerable: true,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(CatmullRom.prototype, "kAlpha", {
+        /**
+         * @member {number} PIXI.particles.CatmullRom#kAlpha
+         */
+        get: function () {
+            if (this._dirty) {
+                this.populate();
+            }
+            return this._kAlpha;
+        },
+        set: function (newVal) {
+            if (this._kAlpha !== newVal) {
+                this._kAlpha = newVal;
+                this._dirty = true;
+            }
+        },
+        enumerable: true,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(CatmullRom.prototype, "pointsPerSegment", {
+        /**
+         * @member {number} PIXI.particles.CatmullRom#pointsPerSegment
+         */
+        get: function () {
+            if (this._dirty) {
+                this.populate();
+            }
+            return this._pointsPerSegment;
+        },
+        set: function (newVal) {
+            if (this._pointsPerSegment !== newVal) {
+                this._pointsPerSegment = newVal;
+                this._dirty = true;
+            }
+        },
+        enumerable: true,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(CatmullRom.prototype, "points", {
+        /**
+         * @member {Array} PIXI.particles.CatmullRom#points
+         */
+        get: function () {
+            if (this._dirty) {
+                this.populate();
+            }
+            return this._points;
+        },
+        enumerable: true,
+        configurable: true
+    });
+    ;
+    /**
+     * updates the spline points
+     * @method PIXI.particles.CatmullRom#populate
+     */
+    CatmullRom.prototype.populate = function () {
+        var last = this._controlPoints.length - 1;
+        this._points = this.catmullRomSpline(this._controlPoints[last], this._controlPoints[0], this._controlPoints[1], this._controlPoints[2]);
+        for (var i = 1; i < last - 1; i++) {
+            this._points = CatmullRom.mergeUnique(this._points, this.catmullRomSpline(this._controlPoints[i - 1], this._controlPoints[i], this._controlPoints[i + 1], this._controlPoints[i + 2]));
+        }
+        this._points = CatmullRom.mergeUnique(this._points, this.catmullRomSpline(this._controlPoints[last - 2], this._controlPoints[last - 1], this._controlPoints[last], this._controlPoints[0]), this.catmullRomSpline(this._controlPoints[last - 1], this._controlPoints[last], this._controlPoints[0], this._controlPoints[1]));
+        this._dirty = false;
+    };
+    /**
+     * @method PIXI.particles.CatmullRom#catmullRomSpline
+     * @description Generates a series of points defining a curve between points P1 and P2.
+     * @param P0 {PIXI.Point} previous point in series
+     * @param P1 {PIXI.Point} first point in spline
+     * @param P2 {PIXI.Point} end point in spline
+     * @param P3 {PIXI.Point} next point in series
+     */
+    CatmullRom.prototype.catmullRomSpline = function (P0, P1, P2, P3) {
+        //Calculate knots
+        var t0, t1, t2, t3;
+        function tNext(tPrev, pPrev, pNext, kAlpha) {
+            return Math.pow(Math.sqrt(Math.pow(pNext.x - pPrev.x, 2) + Math.pow(pNext.y - pPrev.y, 2)), kAlpha) + tPrev;
+        }
+        t0 = 0;
+        t1 = tNext(t0, P0, P1, this._kAlpha);
+        t2 = tNext(t1, P1, P2, this._kAlpha);
+        t3 = tNext(t2, P2, P3, this._kAlpha);
+        //get intervals between knots
+        function linSpace(t1, t2, numKnots) {
+            var ret = [t1];
+            var dist = (t2 - t1) / (numKnots - 1);
+            while (ret.length < numKnots - 1) {
+                ret[ret.length] = ret[ret.length - 1] + dist;
+            }
+            ret[ret.length] = t2;
+            return ret;
+        }
+        /**
+         * @function AN
+         * @description calculates the "A" spline equations
+         * @param t {number} Position on the spline between t1 and t2
+         * @param tP {number} Previous knot
+         * @param tN {number} Next knot
+         * @param PP {PIXI.Point} Previous control point
+         * @param PN {PIXI.Point} Next control point
+         */
+        function AN(t, tP, tN, PP, PN) {
+            var x = ((tN - t) / (tN - tP) * PP.x) + ((t - tP) / (tN - tP) * PN.x);
+            var y = ((tN - t) / (tN - tP) * PP.y) + ((t - tP) / (tN - tP) * PN.y);
+            return new PIXI.Point(x, y);
+        }
+        /**
+         * @function BN
+         * @description calculates the "B" spline equations
+         * @param t {number} Position on the spline between t1 and t2
+         * @param tP {number} Previous knot
+         * @param tN {number} Next knot
+         * @param AP {PIXI.Point} result of AN(t, t(N-1), t(N))
+         * @param AN {PIXI.Point} result of AN(t, t(N), t(N+1))
+         */
+        function BN(t, tP, tN, AP, AN) {
+            var x = ((tN - t) / (tN - tP) * AP.x) + ((t - tP) / (tN - tP) * AN.x);
+            var y = ((tN - t) / (tN - tP) * AP.y) + ((t - tP) / (tN - tP) * AN.y);
+            return new PIXI.Point(x, y);
+        }
+        /**
+         * @function C
+         * @description calculates the "C" spline equation (C  = (t2-t)/(t2-t1)*B1 + (t-t1)/(t2-t1)*B2)
+         * @param t {number} Position on the spline between t1 and t2
+         */
+        function C(t) {
+            var A1 = AN(t, t0, t1, P0, P1);
+            var A2 = AN(t, t1, t2, P1, P2);
+            var A3 = AN(t, t2, t3, P2, P3);
+            var B1 = BN(t, t0, t2, A1, A2);
+            var B2 = BN(t, t1, t3, A2, A3);
+            var x = (((t2 - t) / (t2 - t1)) * B1.x) + ((t - t1) / (t2 - t1) * B2.x);
+            var y = (((t2 - t) / (t2 - t1)) * B1.y) + ((t - t1) / (t2 - t1) * B2.y);
+            return new PIXI.Point(x, y);
+        }
+        var segments = linSpace(t1, t2, this._pointsPerSegment);
+        var ret = [];
+        for (var i = 0; i < segments.length; i++) {
+            ret[i] = C(segments[i]);
+        }
+        return ret;
+    };
+    return CatmullRom;
+}());
+exports.default = CatmullRom;
+
+},{}],3:[function(_dereq_,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var ParticleUtils_1 = _dereq_("./ParticleUtils");
 var Particle_1 = _dereq_("./Particle");
 var PropertyNode_1 = _dereq_("./PropertyNode");
 var ticker = PIXI.ticker.shared;
+var CatmullRom_1 = _dereq_("./CatmullRom");
 var helperPoint = new PIXI.Point();
 /**
  * A particle emitter.
@@ -233,6 +517,7 @@ var Emitter = /** @class */ (function () {
         this._spawnFunc = null;
         this.spawnRect = null;
         this.spawnCircle = null;
+        this.spawnSpline = null;
         this.particlesPerWave = 1;
         this.particleSpacing = 0;
         this.angleStart = 0;
@@ -429,13 +714,14 @@ var Emitter = /** @class */ (function () {
         // Emitter Properties   //
         //////////////////////////
         //reset spawn type specific settings
-        this.spawnRect = this.spawnCircle = null;
+        this.spawnRect = this.spawnCircle = this.spawnSpline = null;
         this.particlesPerWave = 1;
         if (config.particlesPerWave && config.particlesPerWave > 1)
             this.particlesPerWave = config.particlesPerWave;
         this.particleSpacing = 0;
         this.angleStart = 0;
         var spawnCircle;
+        var spawnSpline;
         //determine the spawn function to use
         switch (config.spawnType) {
             case "rect":
@@ -462,6 +748,12 @@ var Emitter = /** @class */ (function () {
                 this._spawnFunc = this._spawnBurst;
                 this.particleSpacing = config.particleSpacing;
                 this.angleStart = config.angleStart ? config.angleStart : 0;
+                break;
+            case "spline":
+                this.spawnType = "spline";
+                this._spawnFunc = this._spawnSpline;
+                spawnSpline = config.spawnSpline;
+                this.spawnSpline = new CatmullRom_1.default(spawnSpline.controlPoints, spawnSpline.kAlpha, spawnSpline.pointsPerSegment);
                 break;
             case "point":
                 this.spawnType = "point";
@@ -687,7 +979,8 @@ var Emitter = /** @class */ (function () {
                         emitPosX = (curX - prevX) * lerp + prevX;
                         emitPosY = (curY - prevY) * lerp + prevY;
                     }
-                    else {
+                    else //otherwise just set to the spawn position
+                     {
                         emitPosX = curX;
                         emitPosY = curY;
                     }
@@ -925,6 +1218,39 @@ var Emitter = /** @class */ (function () {
         p.position.y = emitPosY + helperPoint.y;
     };
     /**
+     * Positions a particle for a spline type emitter.
+     * @method PIXI.particles.Emitter#_spawnSpline
+     * @private
+     * @param {Particle} p The particle to position and rotate.
+     * @param {Number} emitPosX The emitter's x position
+     * @param {Number} emitPosY The emitter's y position
+     * @param {int} i The particle number in the current wave. Not used for this function.
+     */
+    Emitter.prototype._spawnSpline = function (p, emitPosX, emitPosY) {
+        var spawnSpline = this.spawnSpline;
+        //set the initial rotation/direction of the particle based on starting
+        //particle angle and rotation of emitter
+        if (this.minStartRotation == this.maxStartRotation)
+            p.rotation = this.minStartRotation + this.rotation;
+        else
+            p.rotation = Math.random() * (this.maxStartRotation - this.minStartRotation) +
+                this.minStartRotation + this.rotation;
+        //place the particle at a random point on the spline
+        var index = spawnSpline.getIndex(Math.random());
+        helperPoint.x = spawnSpline.points[index].x;
+        helperPoint.y = spawnSpline.points[index].y;
+        //rotate the particle to point out of the spline
+        var normal = spawnSpline.getNormals(index).away;
+        p.rotation += PIXI.RAD_TO_DEG * Math.atan2(normal.y, normal.x);
+        //rotate the point by the emitter's rotation
+        if (this.rotation !== 0) {
+            ParticleUtils_1.default.rotatePoint(this.rotation, helperPoint);
+        }
+        //set the position, offset by the emitter's position
+        p.position.x = emitPosX + helperPoint.x;
+        p.position.y = emitPosY + helperPoint.y;
+    };
+    /**
      * Positions a particle for a burst type emitter.
      * @method PIXI.particles.Emitter#_spawnBurst
      * @private
@@ -983,7 +1309,7 @@ var Emitter = /** @class */ (function () {
 }());
 exports.default = Emitter;
 
-},{"./Particle":3,"./ParticleUtils":4,"./PropertyNode":7}],3:[function(_dereq_,module,exports){
+},{"./CatmullRom":2,"./Particle":4,"./ParticleUtils":5,"./PropertyNode":8}],4:[function(_dereq_,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = Object.setPrototypeOf ||
@@ -1307,7 +1633,7 @@ var Particle = /** @class */ (function (_super) {
 }(Sprite));
 exports.default = Particle;
 
-},{"./ParticleUtils":4,"./PropertyList":6}],4:[function(_dereq_,module,exports){
+},{"./ParticleUtils":5,"./PropertyList":7}],5:[function(_dereq_,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var BLEND_MODES = PIXI.BLEND_MODES;
@@ -1505,7 +1831,7 @@ var ParticleUtils = {
 };
 exports.default = ParticleUtils;
 
-},{"./PropertyNode":7}],5:[function(_dereq_,module,exports){
+},{"./PropertyNode":8}],6:[function(_dereq_,module,exports){
 "use strict";
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = Object.setPrototypeOf ||
@@ -1699,7 +2025,7 @@ var PathParticle = /** @class */ (function (_super) {
 }(Particle_1.default));
 exports.default = PathParticle;
 
-},{"./Particle":3,"./ParticleUtils":4}],6:[function(_dereq_,module,exports){
+},{"./Particle":4,"./ParticleUtils":5}],7:[function(_dereq_,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var ParticleUtils_1 = _dereq_("./ParticleUtils");
@@ -1808,7 +2134,7 @@ function intColorStepped(lerp) {
     return ParticleUtils_1.default.combineRGBComponents(curVal.r, curVal.g, curVal.b);
 }
 
-},{"./ParticleUtils":4}],7:[function(_dereq_,module,exports){
+},{"./ParticleUtils":5}],8:[function(_dereq_,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var ParticleUtils_1 = _dereq_("./ParticleUtils");
@@ -1874,7 +2200,7 @@ var PropertyNode = /** @class */ (function () {
 }());
 exports.default = PropertyNode;
 
-},{"./ParticleUtils":4}],8:[function(_dereq_,module,exports){
+},{"./ParticleUtils":5}],9:[function(_dereq_,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 var ParticleUtils_js_1 = _dereq_("./ParticleUtils.js");
@@ -1887,8 +2213,10 @@ var PathParticle_js_1 = _dereq_("./PathParticle.js");
 exports.PathParticle = PathParticle_js_1.default;
 var AnimatedParticle_js_1 = _dereq_("./AnimatedParticle.js");
 exports.AnimatedParticle = AnimatedParticle_js_1.default;
+var CatmullRom_js_1 = _dereq_("./CatmullRom.js");
+exports.CatmullRom = CatmullRom_js_1.default;
 
-},{"./AnimatedParticle.js":1,"./Emitter.js":2,"./Particle.js":3,"./ParticleUtils.js":4,"./PathParticle.js":5}],9:[function(_dereq_,module,exports){
+},{"./AnimatedParticle.js":1,"./CatmullRom.js":2,"./Emitter.js":3,"./Particle.js":4,"./ParticleUtils.js":5,"./PathParticle.js":6}],10:[function(_dereq_,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 // If we're in the browser make sure PIXI is available
@@ -1909,7 +2237,7 @@ if (typeof module !== "undefined" && module.exports) {
     module.exports = particles;
 }
 
-},{"./particles":8}]},{},[9])(9)
+},{"./particles":9}]},{},[10])(10)
 });
 
 

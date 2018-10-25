@@ -5,6 +5,7 @@ import Particle from "./Particle";
 import PropertyNode from "./PropertyNode";
 import ParticleContainer = PIXI.particles.ParticleContainer;
 import ticker = PIXI.ticker.shared;
+import CatmullRom from "./CatmullRom";
 
 export interface ParticleConstructor {
 	new (emitter:Emitter):Particle;
@@ -215,7 +216,12 @@ export default class Emitter
 	 * @property {PIXI.Circle} spawnCircle
 	 */
 	public spawnCircle: PIXI.Circle & {minRadius: number};
-	/**
+    /**
+     * A spline created using the catmull-rom algorithm
+     * @property {CatmullRom} spawnCircle
+     */
+    public spawnSpline: CatmullRom;
+    /**
 	 * Number of particles to spawn time that the frequency allows for particles to spawn.
 	 * @property {int} particlesPerWave
 	 * @default 1
@@ -395,6 +401,7 @@ export default class Emitter
 		this._spawnFunc = null;
 		this.spawnRect = null;
 		this.spawnCircle = null;
+        this.spawnSpline = null;
 		this.particlesPerWave = 1;
 		this.particleSpacing = 0;
 		this.angleStart = 0;
@@ -605,13 +612,14 @@ export default class Emitter
 		// Emitter Properties   //
 		//////////////////////////
 		//reset spawn type specific settings
-		this.spawnRect = this.spawnCircle = null;
+		this.spawnRect = this.spawnCircle = this.spawnSpline = null;
 		this.particlesPerWave = 1;
 		if (config.particlesPerWave && config.particlesPerWave > 1)
 			this.particlesPerWave = config.particlesPerWave;
 		this.particleSpacing = 0;
 		this.angleStart = 0;
 		let spawnCircle;
+		let spawnSpline;
 		//determine the spawn function to use
 		switch(config.spawnType)
 		{
@@ -640,6 +648,12 @@ export default class Emitter
 				this.particleSpacing = config.particleSpacing;
 				this.angleStart = config.angleStart ? config.angleStart : 0;
 				break;
+            case "spline":
+                this.spawnType = "spline";
+                this._spawnFunc = this._spawnSpline;
+                spawnSpline = config.spawnSpline;
+                this.spawnSpline = new CatmullRom(spawnSpline.controlPoints, spawnSpline.kAlpha, spawnSpline.pointsPerSegment) as any;
+                break;
 			case "point":
 				this.spawnType = "point";
 				this._spawnFunc = this._spawnPoint;
@@ -1151,6 +1165,43 @@ export default class Emitter
 		p.position.x = emitPosX + helperPoint.x;
 		p.position.y = emitPosY + helperPoint.y;
 	}
+
+    /**
+     * Positions a particle for a spline type emitter.
+     * @method PIXI.particles.Emitter#_spawnSpline
+     * @private
+     * @param {Particle} p The particle to position and rotate.
+     * @param {Number} emitPosX The emitter's x position
+     * @param {Number} emitPosY The emitter's y position
+     * @param {int} i The particle number in the current wave. Not used for this function.
+     */
+    protected _spawnSpline(p: Particle, emitPosX: number, emitPosY: number)
+    {
+        let spawnSpline = this.spawnSpline;
+        //set the initial rotation/direction of the particle based on starting
+        //particle angle and rotation of emitter
+        if (this.minStartRotation == this.maxStartRotation)
+            p.rotation = this.minStartRotation + this.rotation;
+        else
+            p.rotation = Math.random() * (this.maxStartRotation - this.minStartRotation) +
+                this.minStartRotation + this.rotation;
+        //place the particle at a random point on the spline
+        let index = spawnSpline.getIndex(Math.random());
+        helperPoint.x = spawnSpline.points[index].x;
+        helperPoint.y = spawnSpline.points[index].y;
+
+        //rotate the particle to point out of the spline
+        let normal = spawnSpline.getNormals(index).away;
+        p.rotation += PIXI.RAD_TO_DEG * Math.atan2(normal.y, normal.x);
+
+        //rotate the point by the emitter's rotation
+        if(this.rotation !== 0) {
+            ParticleUtils.rotatePoint(this.rotation, helperPoint);
+        }
+        //set the position, offset by the emitter's position
+        p.position.x = emitPosX + helperPoint.x;
+        p.position.y = emitPosY + helperPoint.y;
+    }
 
 	/**
 	 * Positions a particle for a burst type emitter.
